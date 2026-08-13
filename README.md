@@ -15,6 +15,7 @@ Inspired by [codex-usage-meter](https://github.com/BkashJEE/codex-usage-meter) â
 - Status-bar chip with the OpenCode brand mark and the current remaining percentage
 - Popover with Rolling / Weekly / Monthly usage windows, each showing used %, remaining % and the reset time
 - 45s in-memory cache, 20s request timeout â€” no background polling loops
+- Lightweight i18n: UI follows the Desktop language (zh-CN auto-detected, English default)
 - Reads the key from your local `~/.hermes/.env`; never stores or logs it
 
 ## Requirements

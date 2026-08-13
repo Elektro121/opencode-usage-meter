@@ -27,6 +27,12 @@ function OpenCodeMark() {
   })
 }
 
+// Lightweight i18n: zh-CN when the UI language is Chinese, English otherwise.
+const ZH = typeof navigator !== 'undefined' && (navigator.language || '').toLowerCase().startsWith('zh')
+const t = (en, zh) => (ZH ? zh : en)
+const LABEL_ZH = { 'Rolling limit': '滚动限额', 'Weekly limit': '每周限额', 'Monthly limit': '每月限额' }
+const ERR_ZH = { 'OpenCode usage is temporarily unavailable.': 'OpenCode 用量暂时不可用。' }
+
 function clampPercent(value) {
   const number = Number(value)
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0
@@ -34,7 +40,7 @@ function clampPercent(value) {
 
 function formatReset(epochSeconds) {
   const value = Number(epochSeconds)
-  if (!Number.isFinite(value) || value <= 0) return 'Reset time unavailable'
+  if (!Number.isFinite(value) || value <= 0) return t('Reset time unavailable', '重置时间不可用')
   return new Intl.DateTimeFormat(undefined, {
     weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
   }).format(new Date(value * 1000))
@@ -58,12 +64,12 @@ function UsageRow({ window }) {
       jsxs('div', {
         className: 'flex items-center justify-between gap-4 text-xs',
         children: [
-          jsx('span', { className: 'text-(--ui-text-secondary)', children: window.label }),
-          jsx('strong', { className: 'font-medium text-(--ui-text-primary)', children: `${Math.round(window.remainingPercent)}% left` })
+          jsx('span', { className: 'text-(--ui-text-secondary)', children: LABEL_ZH[window.label] || window.label }),
+          jsx('strong', { className: 'font-medium text-(--ui-text-primary)', children: `${Math.round(window.remainingPercent)}% ${t('left', '剩余')}` })
         ]
       }),
       jsx(Gauge, { remaining: window.remainingPercent }),
-      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: `Resets ${formatReset(window.resetsAt)}` })
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: `${t('Resets', '重置于')} ${formatReset(window.resetsAt)}` })
     ]
   })
 }
@@ -112,7 +118,7 @@ function UsageMeter() {
           children: jsxs('button', {
             type: 'button',
             className: `inline-flex h-full items-center gap-1 px-1.5 text-[0.6875rem] ${tone} hover:text-(--ui-text-primary)`,
-            title: query.isError ? 'OpenCode usage unavailable' : 'Hover or click for OpenCode usage windows',
+            title: query.isError ? t('OpenCode usage unavailable', 'OpenCode 用量不可用') : t('Hover or click for OpenCode usage windows', '悬停或点击查看 OpenCode 用量窗口'),
             children: [jsx(OpenCodeMark, {}), label]
           })
         }),
@@ -126,8 +132,8 @@ function UsageMeter() {
             ? jsxs('div', {
                 className: 'space-y-1 text-xs',
                 children: [
-                  jsx('div', { className: 'font-medium text-(--ui-warning)', children: 'OpenCode usage unavailable' }),
-                  jsx('div', { className: 'text-(--ui-text-tertiary)', children: query.error?.message || 'Refresh will retry automatically.' })
+                  jsx('div', { className: 'font-medium text-(--ui-warning)', children: t('OpenCode usage unavailable', 'OpenCode 用量不可用') }),
+                  jsx('div', { className: 'text-(--ui-text-tertiary)', children: ERR_ZH[query.error?.message] || query.error?.message || t('Refresh will retry automatically.', '刷新将自动重试。') })
                 ]
               })
             : jsxs('div', {
@@ -136,12 +142,12 @@ function UsageMeter() {
                   jsxs('div', {
                     className: 'flex items-center justify-between',
                     children: [
-                      jsx('div', { className: 'text-xs font-medium', children: 'OpenCode limits' }),
+                      jsx('div', { className: 'text-xs font-medium', children: t('OpenCode limits', 'OpenCode 限额') }),
                       jsx('div', { className: 'text-[0.625rem] uppercase tracking-wide text-(--ui-text-quaternary)', children: data?.planType || 'GO' })
                     ]
                   }),
                   ...windows.map(item => jsx(UsageRow, { window: item }, item.key)),
-                  stale ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-warning)', children: 'Data is stale; retrying automatically.' }) : null
+                  stale ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-warning)', children: t('Data is stale; retrying automatically.', '数据已过期，正在自动重试。') }) : null
                 ]
               })
         })
