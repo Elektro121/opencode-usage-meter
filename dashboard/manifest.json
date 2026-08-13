@@ -1,7 +1,7 @@
 {
   "name": "opencode-usage-meter",
   "label": "OpenCode Usage Meter",
-  "description": "OpenCode Zen/Go usage windows in the Hermes Desktop status bar.",
+  "description": "OpenCode usage windows in the Hermes Desktop status bar.",
   "icon": "Pulse",
   "version": "0.1.0",
   "api": "plugin_api.py"

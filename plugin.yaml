@@ -1,6 +1,6 @@
 name: opencode-usage-meter
 version: 0.1.0
-description: OpenCode Zen/Go usage windows for Hermes Desktop.
+description: OpenCode usage windows for Hermes Desktop.
 author: Vocllum
 license: MIT
 kind: standalone

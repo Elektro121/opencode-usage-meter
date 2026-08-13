@@ -1,6 +1,6 @@
 # OpenCode Usage Meter
 
-A [Hermes Agent](https://hermes-agent.nousresearch.com) Desktop status-bar plugin that shows your live [OpenCode](https://opencode.ai) Zen/Go usage windows (rolling, weekly, monthly) with reset times.
+A [Hermes Agent](https://hermes-agent.nousresearch.com) Desktop status-bar plugin that shows your live [OpenCode](https://opencode.ai) usage windows (rolling, weekly, monthly) with reset times.
 
 Inspired by [codex-usage-meter](https://github.com/BkashJEE/codex-usage-meter) — the Codex counterpart for the same status bar.
 
@@ -20,7 +20,7 @@ Inspired by [codex-usage-meter](https://github.com/BkashJEE/codex-usage-meter) �
 ## Requirements
 
 - Hermes Agent Desktop (the status bar is part of the Desktop app)
-- An OpenCode API key (Go or Zen) in `~/.hermes/.env`:
+- An OpenCode API key in `~/.hermes/.env` (Go or Zen — the endpoint is account-wide, either works):
 
 ```env
 OPENCODE_GO_API_KEY=sk-...
@@ -48,7 +48,7 @@ Finally restart Hermes Desktop. The frontend hot-reloads on file change; the bac
 ## How it works
 
 - The backend calls `https://opencode.ai/zen/go/v1/usage` with your key (a browser User-Agent is required — the endpoint is behind Cloudflare and blocks non-browser UAs with HTTP 403 / error 1010).
-- Usage is account-wide: Zen and Go keys report the same numbers, so the popover shows a single set of windows labeled `GO`.
+- Usage is account-wide: the endpoint returns identical numbers for Zen and Go keys, so Zen/Go usage can't be queried separately — the popover shows one set of windows labeled `GO`.
 - Both parts fail closed: on any error the chip shows `—` and the popover reports `Data unavailable`; no fake numbers are ever rendered.
 
 ## Privacy

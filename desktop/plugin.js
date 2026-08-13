@@ -112,7 +112,7 @@ function UsageMeter() {
           children: jsxs('button', {
             type: 'button',
             className: `inline-flex h-full items-center gap-1 px-1.5 text-[0.6875rem] ${tone} hover:text-(--ui-text-primary)`,
-            title: query.isError ? 'OpenCode usage unavailable' : 'Hover or click for OpenCode Zen/Go usage windows',
+            title: query.isError ? 'OpenCode usage unavailable' : 'Hover or click for OpenCode usage windows',
             children: [jsx(OpenCodeMark, {}), label]
           })
         }),

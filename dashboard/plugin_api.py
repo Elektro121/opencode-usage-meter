@@ -1,6 +1,6 @@
-"""Read-only OpenCode Zen/Go usage bridge for the Hermes Desktop plugin.
+"""Read-only OpenCode usage bridge for the Hermes Desktop plugin.
 
-Queries the public OpenCode Zen usage endpoint (opencode.ai/zen/go/v1/usage)
+Queries the public OpenCode usage endpoint (opencode.ai/zen/go/v1/usage)
 with the API key stored in $HERMES_HOME/.env (OPENCODE_GO_API_KEY /
 OPENCODE_ZEN_API_KEY), mirroring the codex-usage-meter plugin's auth and
 caching pattern.
@@ -30,6 +30,8 @@ except ImportError:  # pragma: no cover - source-tree tests
 
 
 _USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
+# Key precedence: GO → ZEN → generic. The endpoint is account-wide, so
+# Zen and Go keys return identical numbers (Zen usage can't be split out).
 _ENV_KEY_CANDIDATES = (
     "OPENCODE_GO_API_KEY",
     "OPENCODE_ZEN_API_KEY",
