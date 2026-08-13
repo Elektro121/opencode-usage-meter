@@ -24,15 +24,20 @@ OPENCODE_ZEN_API_KEY=sk-...
 
 ## Install
 
-The repo follows the same layout as the Codex meter — `backend/` (plugin.yaml + dashboard API) and `desktop/` (status-bar frontend). Install from a local checkout:
+The backend follows the standard Hermes plugin layout (`plugin.yaml` + `dashboard/`), so install it from a local checkout:
 
 ```bash
 hermes plugins install file:///path/to/opencode-usage-meter --enable
 ```
 
-This places the backend under `~/.hermes/plugins/opencode-usage-meter/` and the frontend under `~/.hermes/desktop-plugins/opencode-usage-meter/`.
+Then place the status-bar frontend:
 
-Then restart Hermes Desktop. The frontend hot-reloads on file change; the backend route mounts at backend startup, so a restart is required once after installing.
+```bash
+mkdir -p ~/.hermes/desktop-plugins/opencode-usage-meter
+cp desktop/plugin.js ~/.hermes/desktop-plugins/opencode-usage-meter/plugin.js
+```
+
+Finally restart Hermes Desktop. The frontend hot-reloads on file change; the backend route mounts at backend startup, so a restart is required once after installing.
 
 ## How it works
 
