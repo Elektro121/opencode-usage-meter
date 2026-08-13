@@ -4,6 +4,12 @@ A [Hermes Agent](https://hermes-agent.nousresearch.com) Desktop status-bar plugi
 
 Inspired by [codex-usage-meter](https://github.com/BkashJEE/codex-usage-meter) — the Codex counterpart for the same status bar.
 
+## Screenshot
+
+![OpenCode Usage Meter](assets/screenshot.png)
+
+*Status-bar chip and the limits popover. Enjoy your DeepSeek ✨*
+
 ## Features
 
 - Status-bar chip with the OpenCode brand mark and the current remaining percentage
