@@ -77,24 +77,60 @@ def _require_plugin_auth(request: Request) -> None:
 router = APIRouter(dependencies=[Depends(_require_plugin_auth)])
 
 
-def _api_key() -> str:
-    """Return the OpenCode API key, preferring process env then $HERMES_HOME/.env."""
-    for name in _ENV_KEY_CANDIDATES:
-        value = (os.environ.get(name) or "").strip()
-        if value:
-            return value
+def _clean_secret(value: Any) -> str:
+    return str(value or "").strip().strip('"').strip("'")
+
+
+def _env_file_keys() -> dict[str, str]:
     env_path = Path(get_hermes_home()) / ".env"
-    if env_path.is_file():
-        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            if key.strip() in _ENV_KEY_CANDIDATES:
-                value = value.strip().strip('"').strip("'")
-                if value:
-                    return value
-    raise RuntimeError("OpenCode API key was not found")
+    found: dict[str, str] = {}
+    if not env_path.is_file():
+        return found
+    for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        name = key.strip()
+        if name not in _ENV_KEY_CANDIDATES or name in found:
+            continue
+        value = _clean_secret(value)
+        if value:
+            found[name] = value
+    return found
+
+
+def _api_keys() -> list[str]:
+    """GO → ZEN → generic, process env then $HERMES_HOME/.env. Deduplicate values."""
+    values: list[str] = []
+    seen: set[str] = set()
+    file_keys = _env_file_keys()
+    for name in _ENV_KEY_CANDIDATES:
+        for raw in (os.environ.get(name), file_keys.get(name)):
+            value = _clean_secret(raw)
+            if value and value not in seen:
+                seen.add(value)
+                values.append(value)
+    if not values:
+        raise RuntimeError("OpenCode API key was not found")
+    return values
+
+
+def _fetch_usage_with(token: str) -> bytes:
+    # Cloudflare on opencode.ai blocks non-browser User-Agents (HTTP 403, code 1010).
+    request = urllib.request.Request(
+        _USAGE_URL,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+            ),
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
+        return response.read()
 
 
 def _parse_iso_to_epoch(value: Any) -> int | None:
@@ -110,25 +146,32 @@ def _parse_iso_to_epoch(value: Any) -> int | None:
 
 
 def _fetch_usage() -> dict[str, Any]:
-    token = _api_key()
-    # Cloudflare on opencode.ai blocks non-browser User-Agents (HTTP 403, code 1010).
-    request = urllib.request.Request(
-        _USAGE_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-            ),
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
-            body = response.read()
-    except TimeoutError as exc:
-        raise RuntimeError("Timed out waiting for OpenCode usage API") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError("OpenCode usage API is unreachable") from exc
+    keys = _api_keys()
+    body = b""
+    last_http = None
+    for index, token in enumerate(keys):
+        try:
+            body = _fetch_usage_with(token)
+            break
+        except TimeoutError as exc:
+            raise RuntimeError("Timed out waiting for OpenCode usage API") from exc
+        except urllib.error.HTTPError as exc:
+            last_http = exc.code
+            try:
+                exc.read()
+            except Exception:
+                pass
+            if exc.code == 401 and index < len(keys) - 1:
+                continue
+            if exc.code == 401:
+                raise RuntimeError("OpenCode API key was rejected") from exc
+            raise RuntimeError("OpenCode usage API is unreachable") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError("OpenCode usage API is unreachable") from exc
+    else:
+        if last_http == 401:
+            raise RuntimeError("OpenCode API key was rejected")
+        raise RuntimeError("OpenCode usage API is unreachable")
     try:
         payload = json.loads(body.decode("utf-8", "replace"))
     except json.JSONDecodeError as exc:
@@ -191,6 +234,7 @@ def _safe_error_message(exc: Exception) -> str:
     message = str(exc)
     safe_messages = (
         "OpenCode API key was not found",
+        "OpenCode API key was rejected",
         "OpenCode usage API is unreachable",
         "Timed out waiting for OpenCode usage API",
         "OpenCode returned an invalid usage payload",

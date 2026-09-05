@@ -3,6 +3,6 @@
   "label": "OpenCode Usage Meter",
   "description": "OpenCode usage windows in the Hermes Desktop status bar.",
   "icon": "Pulse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api": "plugin_api.py"
 }
