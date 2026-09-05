@@ -208,8 +208,13 @@ function UsageMeter() {
   const data = query.data
   const windows = Array.isArray(data?.windows) ? data.windows : []
   const weeklyKey = windows.find(item => item.key.startsWith('weekly-'))?.key || null
-  const userPinned = pinnedWindow && windows.some(item => item.key === pinnedWindow) ? pinnedWindow : null
-  const effectivePinned = userPinned || weeklyKey
+  // Stored value is a window key, 'auto' (explicit auto choice), or '' (never chosen → default weekly).
+  const storedChoice = readStoredValue(PINNED_WINDOW_KEY, '')
+  const userPinned = storedChoice && storedChoice !== 'auto' && windows.some(item => item.key === storedChoice)
+    ? storedChoice
+    : null
+  const userAuto = storedChoice === 'auto'
+  const effectivePinned = userPinned || (userAuto ? null : weeklyKey)
   const orderedWindows = [...windows].sort((a, b) => {
     const rank = key => key.startsWith('weekly-') ? 0 : key.startsWith('rolling-') ? 1 : key.startsWith('monthly-') ? 2 : 3
     return rank(a.key) - rank(b.key)
@@ -234,12 +239,9 @@ function UsageMeter() {
     writeStoredValue(SHOW_STATUS_LABELS_KEY, String(next))
   }
   const changePinnedWindow = next => {
-    const value = next || null
+    const value = next || 'auto'
     setPinnedWindow(value)
-    if (value) writeStoredValue(PINNED_WINDOW_KEY, value)
-    else {
-      try { globalThis.localStorage?.removeItem(PINNED_WINDOW_KEY) } catch {}
-    }
+    writeStoredValue(PINNED_WINDOW_KEY, value)
   }
   const refresh = () => { query.refetch().catch(() => {}) }
   const hasData = Boolean(statusWindow)
