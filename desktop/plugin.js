@@ -224,7 +224,7 @@ function UsageMeter() {
   }, null)
   const remaining = statusWindow ? clampPercent(statusWindow.remainingPercent) : null
   const stale = Boolean(data?.stale) || (data?.fetchedAt ? Date.now() - data.fetchedAt > 180_000 : false)
-  const automatic = !userPinned && activePinnedWindow == null
+  const automatic = !activePinnedWindow
   const otherWindows = orderedWindows.filter(item => item.key !== statusWindow?.key)
   const plan = data?.planType || 'GO'
   const reset = resetInfo(statusWindow?.resetsAt)
