@@ -1,4 +1,4 @@
-/** OpenCode Usage Meter v0.1.2 — live OpenCode Go usage windows in Hermes Desktop. */
+/** OpenCode Usage Meter v0.1.3-iris — Go usage ($ + pacing) + soldes autres comptes (OpenRouter, Exa, Kagi, Firecrawl, Tavily). */
 import {
   Popover,
   PopoverContent,
@@ -12,7 +12,10 @@ import { useRef, useState } from 'react'
 const ID = 'opencode-usage-meter'
 let rest
 
-/** OpenCode brand mark — official favicon "O" glyph at 14x16, recolored via currentColor. */
+/** Caps Go (USD) : 5h / semaine / mois. */
+const CAPS = { rolling: 12, weekly: 30, monthly: 60 }
+const LABELS = { rolling: '5h', weekly: 'Semaine', monthly: 'Mois' }
+
 function OpenCodeMark() {
   return jsx('svg', {
     viewBox: '0 0 14 16',
@@ -27,49 +30,142 @@ function OpenCodeMark() {
   })
 }
 
-// Lightweight i18n: zh-CN when the UI language is Chinese, English otherwise.
-const ZH = typeof navigator !== 'undefined' && (navigator.language || '').toLowerCase().startsWith('zh')
-const t = (en, zh) => (ZH ? zh : en)
-const LABEL_ZH = { 'Rolling limit': '滚动限额', 'Weekly limit': '每周限额', 'Monthly limit': '每月限额' }
-const ERR_ZH = { 'OpenCode usage is temporarily unavailable.': 'OpenCode 用量暂时不可用。' }
-
 function clampPercent(value) {
   const number = Number(value)
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0
 }
 
+function usd(value) {
+  return `${Number(value).toFixed(2).replace('.', ',')}\u00A0$`
+}
+
+function nb(value) {
+  return Math.round(Number(value)).toLocaleString('fr-FR')
+}
+
 function formatReset(epochSeconds) {
   const value = Number(epochSeconds)
-  if (!Number.isFinite(value) || value <= 0) return t('Reset time unavailable', '重置时间不可用')
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  if (!Number.isFinite(value) || value <= 0) return 'reset inconnu'
+  return new Intl.DateTimeFormat('fr-FR', {
+    weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
   }).format(new Date(value * 1000))
 }
 
-function Gauge({ remaining }) {
+function Gauge({ remaining, warning }) {
   const value = clampPercent(remaining)
   return jsx('div', {
     className: 'h-1.5 overflow-hidden rounded-full bg-(--ui-fill-secondary)',
     children: jsx('div', {
-      className: 'h-full rounded-full bg-(--ui-accent) transition-[width]',
-      style: { width: `${value}%` }
+      className: 'h-full rounded-full transition-[width]',
+      style: {
+        width: `${value}%`,
+        background: warning ? 'var(--ui-warning)' : 'var(--ui-accent)'
+      }
     })
   })
 }
 
+/** Fenêtre OpenCode en dollars (cap fixe). */
 function UsageRow({ window }) {
+  const cap = CAPS[window.key.split('-')[0]] || null
+  const usedPct = clampPercent(window.usedPercent)
+  const usedUsd = cap ? cap * usedPct / 100 : null
+  const low = 100 - usedPct <= 20
   return jsxs('div', {
     className: 'space-y-1.5',
     children: [
       jsxs('div', {
         className: 'flex items-center justify-between gap-4 text-xs',
         children: [
-          jsx('span', { className: 'text-(--ui-text-secondary)', children: LABEL_ZH[window.label] || window.label }),
-          jsx('strong', { className: 'font-medium text-(--ui-text-primary)', children: `${Math.round(window.remainingPercent)}% ${t('left', '剩余')}` })
+          jsx('span', { className: 'text-(--ui-text-secondary)', children: LABELS[window.key.split('-')[0]] || window.label }),
+          jsx('strong', {
+            className: 'font-medium text-(--ui-text-primary)',
+            children: usedUsd != null ? `${usd(usedUsd)} / ${usd(cap)}` : `${Math.round(usedPct)}% utilisés`
+          })
         ]
       }),
-      jsx(Gauge, { remaining: window.remainingPercent }),
-      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: `${t('Resets', '重置于')} ${formatReset(window.resetsAt)}` })
+      jsx(Gauge, { remaining: window.remainingPercent, warning: low }),
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: `Reset ${formatReset(window.resetsAt)}` })
+    ]
+  })
+}
+
+/** Pacing mensuel Go : fenêtre 30 j glissante dérivée de resetsAt (jamais le calendrier civil). */
+function PacingCard({ window }) {
+  const cap = CAPS.monthly
+  const used = clampPercent(window.usedPercent) * cap / 100
+  const resetInSec = Number(window.resetsAt) - Date.now() / 1000
+  if (!Number.isFinite(resetInSec) || resetInSec <= 0) {
+    return jsx('div', { className: 'rounded-md bg-(--ui-fill-tertiary) p-2 text-[0.6875rem] text-(--ui-text-secondary)', children: '📅 Fenêtre mensuelle sur le point de se réinitialiser.' })
+  }
+  const daysLeft = resetInSec / 86400
+  const daysElapsed = Math.max(0.25, 30 - daysLeft)
+  const target = cap * daysElapsed / 30
+  const delta = used - target
+  const projected = used / daysElapsed * 30
+  const margin = cap - projected
+  const verdict = delta > 1 ? '🔴' : delta < -1 ? '🟢' : '🟡'
+  const verdictText = delta > 1 ? `en avance de ${usd(Math.abs(delta))}` : delta < -1 ? `sous l'objectif de ${usd(Math.abs(delta))}` : 'dans le rythme'
+  const lines = [
+    `📅 Pacing : ${verdict} ${verdictText} (cible ${usd(target)})`,
+    margin >= 0
+      ? `Projection fin de fenêtre : ${usd(projected)} → marge ${usd(margin)}`
+      : `Projection fin de fenêtre : ${usd(projected)} → dépassement ${usd(Math.abs(margin))}`
+  ]
+  return jsxs('div', {
+    className: 'space-y-0.5 rounded-md bg-(--ui-fill-tertiary) p-2 text-[0.6875rem] text-(--ui-text-secondary)',
+    children: lines.map((line, index) => jsx('div', { children: line }, index))
+  })
+}
+
+/** Une ligne par autre compte, selon le kind renvoyé par /providers. */
+function ProviderRow({ name, data }) {
+  if (!data || data.status === 'not_configured' || data.status === 'unavailable') return null
+  if (data.status === 'error') {
+    return jsxs('div', {
+      className: 'flex items-center justify-between gap-4 text-xs',
+      children: [
+        jsx('span', { className: 'text-(--ui-text-secondary)', children: name }),
+        jsx('span', { className: 'text-(--ui-warning)', title: data.error || '', children: '—' })
+      ]
+    })
+  }
+  const labels = {
+    openrouter: 'OpenRouter',
+    exa: 'Exa',
+    kagi: 'Kagi',
+    firecrawl: 'Firecrawl',
+    tavily: 'Tavily'
+  }
+  let value = ''
+  let percent = null
+  let subline = ''
+  if (data.kind === 'balance') {
+    value = usd(data.balance)
+    if (name === 'openrouter' && Number(data.monthlyUsage) > 0) subline = `Mois ${usd(data.monthlyUsage)}`
+  } else if (data.kind === 'budget') {
+    value = `${usd(data.remaining)} / ${usd(data.budget)}`
+    percent = data.budget ? 100 * data.spent / data.budget : null
+  } else if (data.kind === 'credits') {
+    value = `${nb(data.remaining)} / ${nb(data.total)}`
+    percent = data.usedPercent
+  } else if (data.kind === 'plan') {
+    value = data.limit != null ? `${nb(data.used)} / ${nb(data.limit)}` : nb(data.used)
+    percent = data.usedPercent
+    subline = data.plan || ''
+  }
+  return jsxs('div', {
+    className: 'space-y-1',
+    children: [
+      jsxs('div', {
+        className: 'flex items-center justify-between gap-4 text-xs',
+        children: [
+          jsx('span', { className: 'text-(--ui-text-secondary)', children: labels[name] || name }),
+          jsx('strong', { className: 'font-medium text-(--ui-text-primary)', children: value })
+        ]
+      }),
+      percent != null ? jsx(Gauge, { remaining: 100 - percent }) : null,
+      subline ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: subline }) : null
     ]
   })
 }
@@ -86,23 +182,32 @@ function UsageMeter() {
     if (closeTimer.current) clearTimeout(closeTimer.current)
     closeTimer.current = setTimeout(() => setOpen(false), 70)
   }
-  const query = useQuery({
+  const usage = useQuery({
     queryKey: [ID, 'usage'],
     queryFn: () => rest('/usage', { timeoutMs: 20000 }),
     refetchInterval: 60_000,
     staleTime: 45_000,
     retry: 1
   })
-  const data = query.data
+  const providers = useQuery({
+    queryKey: [ID, 'providers'],
+    queryFn: () => rest('/providers', { timeoutMs: 20000 }),
+    refetchInterval: 120_000,
+    staleTime: 90_000,
+    retry: 1
+  })
+  const data = usage.data
   const windows = Array.isArray(data?.windows) ? data.windows : []
   const remaining = windows.length ? Math.min(...windows.map(item => clampPercent(item.remainingPercent))) : null
-  const stale = data?.fetchedAt ? Date.now() - data.fetchedAt > 180_000 : false
-  const label = query.isError
+  const monthly = windows.find(item => item.key.startsWith('monthly'))
+  const providerData = providers.data && typeof providers.data === 'object' ? providers.data : {}
+  const providerNames = ['openrouter', 'exa', 'kagi', 'firecrawl', 'tavily']
+  const label = usage.isError
     ? 'OpenCode —'
     : remaining == null
       ? 'OpenCode …'
-      : `OpenCode ${Math.round(remaining)}%`
-  const tone = query.isError || stale || (remaining != null && remaining <= 20)
+      : `Go ${Math.round(remaining)}%`
+  const tone = usage.isError || (remaining != null && remaining <= 20)
     ? 'text-(--ui-warning)'
     : 'text-(--ui-text-tertiary)'
 
@@ -115,10 +220,10 @@ function UsageMeter() {
       children: [
         jsx(PopoverTrigger, {
           asChild: true,
-          children: jsxs('button', {
+          children: jsx('button', {
             type: 'button',
             className: `inline-flex h-full items-center gap-1 px-1.5 text-[0.6875rem] ${tone} hover:text-(--ui-text-primary)`,
-            title: query.isError ? t('OpenCode usage unavailable', 'OpenCode 用量不可用') : t('Hover or click for OpenCode usage windows', '悬停或点击查看 OpenCode 用量窗口'),
+            title: usage.isError ? 'OpenCode indisponible' : 'Usage Go + soldes des autres comptes',
             children: [jsx(OpenCodeMark, {}), label]
           })
         }),
@@ -128,12 +233,12 @@ function UsageMeter() {
           onMouseEnter: keepOpen,
           onMouseLeave: closeSoon,
           className: 'relative w-80 overflow-hidden space-y-3 p-3',
-          children: query.isError
+          children: usage.isError
             ? jsxs('div', {
                 className: 'space-y-1 text-xs',
                 children: [
-                  jsx('div', { className: 'font-medium text-(--ui-warning)', children: t('OpenCode usage unavailable', 'OpenCode 用量不可用') }),
-                  jsx('div', { className: 'text-(--ui-text-tertiary)', children: ERR_ZH[query.error?.message] || query.error?.message || t('Refresh will retry automatically.', '刷新将自动重试。') })
+                  jsx('div', { className: 'font-medium text-(--ui-warning)', children: 'OpenCode indisponible' }),
+                  jsx('div', { className: 'text-(--ui-text-tertiary)', children: usage.error?.message || 'Nouvel essai automatique.' })
                 ]
               })
             : jsxs('div', {
@@ -142,12 +247,25 @@ function UsageMeter() {
                   jsxs('div', {
                     className: 'flex items-center justify-between',
                     children: [
-                      jsx('div', { className: 'text-xs font-medium', children: t('OpenCode limits', 'OpenCode 限额') }),
-                      jsx('div', { className: 'text-[0.625rem] uppercase tracking-wide text-(--ui-text-quaternary)', children: data?.planType || 'GO' })
+                      jsx('div', { className: 'text-xs font-medium', children: 'Limites Go' }),
+                      jsx('div', { className: 'text-[0.625rem] uppercase tracking-wide text-(--ui-text-quaternary)', children: 'GO' })
                     ]
                   }),
                   ...windows.map(item => jsx(UsageRow, { window: item }, item.key)),
-                  stale ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-warning)', children: t('Data is stale; retrying automatically.', '数据已过期，正在自动重试。') }) : null
+                  monthly ? jsx(PacingCard, { window: monthly }) : null,
+                  jsxs('div', {
+                    className: 'space-y-2',
+                    children: [
+                      jsx('div', { className: 'text-xs font-medium', children: 'Autres comptes' }),
+                      providers.isError
+                        ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-warning)', children: 'Soldes indisponibles' })
+                        : providerNames.map(name => jsx(ProviderRow, { name, data: providerData[name] }, name))
+                    ]
+                  }),
+                  jsxs('div', {
+                    className: 'text-[0.625rem] text-(--ui-text-quaternary)',
+                    children: ['Soldes rafraîchis toutes les 2 min · ', providers.dataUpdatedAt ? new Intl.DateTimeFormat('fr-FR', { hour: 'numeric', minute: '2-digit' }).format(new Date(providers.dataUpdatedAt)) : '—']
+                  })
                 ]
               })
         })

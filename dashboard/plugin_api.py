@@ -11,6 +11,7 @@ import datetime as _dt
 import hmac
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -208,3 +209,214 @@ def usage() -> dict[str, Any]:
         return _current_usage()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=_safe_error_message(exc)) from None
+
+
+# ─── Iris: providers additionnels (OpenRouter / Exa / Kagi) ──────────────
+
+_ENV_PATH = Path(get_hermes_home()) / ".env"
+
+
+def _env_value(name: str) -> str:
+    """Clé API : process env d'abord, puis $HERMES_HOME/.env (clé non commentée)."""
+    value = (os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if _ENV_PATH.is_file():
+        for line in _ENV_PATH.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, raw = line.partition("=")
+            if key.strip() == name:
+                return raw.strip().strip('"').strip("'")
+    return ""
+
+
+def _kagi_session_cookie() -> str:
+    """Session Kagi : KAGI_SESSION_LINK (lien complet ?token=...) ou token brut."""
+    raw = os.environ.get("KAGI_SESSION_LINK") or os.environ.get("KAGI_SESSION_TOKEN") or _env_value("KAGI_SESSION_LINK")
+    if not raw:
+        return ""
+    raw = raw.strip()
+    if "token=" in raw:
+        try:
+            from urllib.parse import urlparse, parse_qs
+            return parse_qs(urlparse(raw).query).get("token", [""])[0]
+        except Exception:
+            return ""
+    return raw
+
+
+def _http_get(url: str, headers: dict[str, str], timeout: int = 15) -> Any:
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read()
+    content_type = response.headers.get("content-type", "")
+    if "json" in content_type:
+        return json.loads(body.decode("utf-8", "replace"))
+    return body.decode("utf-8", "replace")
+
+
+def _fetch_openrouter() -> dict[str, Any] | None:
+    key = _env_value("OPENROUTER_API_KEY")
+    if not key:
+        return None
+    headers = {"Authorization": f"Bearer {key}"}
+    key_data = _http_get("https://openrouter.ai/api/v1/key", headers, timeout=10).get("data", {})
+    credits = _http_get("https://openrouter.ai/api/v1/credits", headers, timeout=10).get("data", {})
+    total = float(credits.get("total_credits") or 0.0)
+    used = float(credits.get("total_usage") or 0.0)
+    return {
+        "kind": "balance",
+        "balance": round(total - used, 2),
+        "totalCredits": round(total, 2),
+        "dailyUsage": round(float(key_data.get("usage_daily") or 0.0), 2),
+        "weeklyUsage": round(float(key_data.get("usage_weekly") or 0.0), 2),
+        "monthlyUsage": round(float(key_data.get("usage_monthly") or 0.0), 2),
+    }
+
+
+def _fetch_exa() -> dict[str, Any] | None:
+    service_key = _env_value("EXA_SERVICE_API_KEY")
+    if not service_key:
+        return None
+    headers = {"x-api-key": service_key, "User-Agent": "Mozilla/5.0"}
+    keys_payload = _http_get(
+        "https://admin-api.exa.ai/team-management/api-keys", headers, timeout=15
+    )
+    api_keys = keys_payload.get("apiKeys") or (
+        [keys_payload["apiKey"]] if keys_payload.get("apiKey") else []
+    )
+    if not api_keys:
+        raise RuntimeError("Exa: no API key id found")
+    key_id = api_keys[0].get("id", "")
+    if not key_id:
+        raise RuntimeError("Exa: no API key id found")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d")
+    try:
+        usage = _http_get(
+            f"https://admin-api.exa.ai/team-management/api-keys/{key_id}/usage?start_date={start}",
+            headers, timeout=15,
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 400:
+            raise
+        usage = _http_get(
+            f"https://admin-api.exa.ai/team-management/api-keys/{key_id}/usage",
+            headers, timeout=15,
+        )
+    spent = float(usage.get("total_cost_usd") or 0.0)
+    monthly_budget = 10.0  # allocation Exa d'Elektro (bonus de 10 $ expiré le 03/09)
+    return {
+        "kind": "budget",
+        "spent": round(spent, 2),
+        "budget": monthly_budget,
+        "remaining": round(monthly_budget - spent, 2),
+    }
+
+
+def _fetch_kagi() -> dict[str, Any] | None:
+    token = _kagi_session_cookie()
+    if not token:
+        return None
+    html = _http_get(
+        "https://kagi.com/api/billing",
+        {"Cookie": f"kagi_session={token}", "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
+        timeout=15,
+    )
+    if isinstance(html, dict):
+        raise RuntimeError("Kagi session expired")
+    match = re.search(r"Balance.*?\$\s?(\d+[.,]\d{2})", html[:html.find("Balance") + 400] if "Balance" in html else html, re.DOTALL)
+    balance = float(match.group(1).replace(",", ".")) if match else None
+    if balance is None:
+        raise RuntimeError("Kagi: balance not found in billing page")
+    return {"kind": "balance", "balance": round(balance, 2)}
+
+
+def _fetch_firecrawl() -> dict[str, Any] | None:
+    key = _env_value("FIRECRAWL_API_KEY")
+    if not key:
+        return None
+    data = _http_get(
+        "https://api.firecrawl.dev/v2/team/credit-usage",
+        {"Authorization": f"Bearer {key}"},
+        timeout=10,
+    ).get("data", {})
+    remaining = float(data.get("remainingCredits") or 0.0)
+    total = float(data.get("planCredits") or 0.0)
+    return {
+        "kind": "credits",
+        "remaining": remaining,
+        "total": total,
+        "usedPercent": round(100.0 * (total - remaining) / total, 1) if total else None,
+        "periodEnd": data.get("billingPeriodEnd"),
+    }
+
+
+def _fetch_tavily() -> dict[str, Any] | None:
+    key = _env_value("TAVILY_API_KEY")
+    if not key:
+        return None
+    payload = _http_get(
+        "https://api.tavily.com/usage",
+        {"Authorization": f"Bearer {key}"},
+        timeout=10,
+    )
+    account = payload.get("account", {}) if isinstance(payload, dict) else {}
+    used = float(account.get("plan_usage") or 0.0)
+    limit_raw = account.get("plan_limit")
+    limit = float(limit_raw) if limit_raw is not None else None
+    return {
+        "kind": "plan",
+        "plan": account.get("current_plan"),
+        "used": used,
+        "limit": limit,
+        "remaining": round(limit - used, 1) if limit is not None else None,
+        "usedPercent": round(100.0 * used / limit, 1) if limit else None,
+    }
+
+
+_PROVIDER_FETCHERS = {
+    "openrouter": _fetch_openrouter,
+    "exa": _fetch_exa,
+    "kagi": _fetch_kagi,
+    "firecrawl": _fetch_firecrawl,
+    "tavily": _fetch_tavily,
+}
+
+_OTHER_CACHE: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_OTHER_CACHE_LOCK = threading.RLock()
+_OTHER_CACHE_SECONDS = 300  # soldes : pas besoin de fraîcheur à la seconde
+
+
+def _provider_payload(name: str) -> dict[str, Any]:
+    fetch = _PROVIDER_FETCHERS.get(name)
+    if fetch is None:
+        raise HTTPException(status_code=404, detail=f"Unknown provider {name}")
+    with _OTHER_CACHE_LOCK:
+        cached = _OTHER_CACHE.get(name)
+        now = time.monotonic()
+        if cached and now - cached[0] < _OTHER_CACHE_SECONDS:
+            return cached[1] or {"status": "unavailable"}
+    try:
+        payload = fetch()
+    except urllib.error.HTTPError as exc:
+        payload = {"error": f"{name}: HTTP {exc.code}"}
+    except Exception as exc:
+        payload = {"error": str(exc)[:120]}
+    with _OTHER_CACHE_LOCK:
+        if payload is None:
+            _OTHER_CACHE[name] = (now, None)
+            return {"status": "not_configured"}
+        if "error" in payload:
+            _OTHER_CACHE[name] = (now, None)  # ne pas cacher une erreur
+            return {"status": "error", "error": payload["error"]}
+        result = {"status": "ok", **payload, "fetchedAt": int(time.time() * 1000)}
+        _OTHER_CACHE[name] = (now, result)
+        return result
+
+
+@router.get("/providers")
+def providers() -> dict[str, Any]:
+    return {name: _provider_payload(name) for name in _PROVIDER_FETCHERS}
