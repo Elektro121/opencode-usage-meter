@@ -1,4 +1,4 @@
-/** OpenCode Usage Meter v0.1.3-iris — Go usage ($ + pacing) + soldes autres comptes (OpenRouter, Exa, Kagi, Firecrawl, Tavily). */
+/** OpenCode Usage Meter v0.1.4-iris — Go usage ($ + pacing) + soldes autres comptes, layout uniforme. */
 import {
   Popover,
   PopoverContent,
@@ -65,27 +65,49 @@ function Gauge({ remaining, warning }) {
   })
 }
 
-/** Fenêtre OpenCode en dollars (cap fixe). */
+/** En-tête de section : titre à gauche, badge discret à droite. */
+function SectionHeader({ title, badge }) {
+  return jsxs('div', {
+    className: 'flex items-center justify-between',
+    children: [
+      jsx('div', { className: 'text-xs font-medium', children: title }),
+      badge ? jsx('div', { className: 'text-[0.625rem] uppercase tracking-wide text-(--ui-text-quaternary)', children: badge }) : null
+    ]
+  })
+}
+
+/** Ligne meta : petit texte gris aligné sous le label (jamais flottant). */
+function MetaLine({ children }) {
+  return jsx('div', { className: 'pl-0.5 text-[0.6875rem] leading-4 text-(--ui-text-quaternary)', children })
+}
+
+/**
+ * Fenêtre Go : usage en dollars (cap fixe) + %, jauge restante, reset.
+ *  5h        0,12 $ / 12,00 $ · 1 %
+ *  ▓▓░░░░░░░░░░░░░░░░░░
+ *  Reset jeu. 10 · 14:03
+ */
 function UsageRow({ window }) {
-  const cap = CAPS[window.key.split('-')[0]] || null
+  const key = window.key.split('-')[0]
+  const cap = CAPS[key] || null
   const usedPct = clampPercent(window.usedPercent)
   const usedUsd = cap ? cap * usedPct / 100 : null
   const low = 100 - usedPct <= 20
   return jsxs('div', {
-    className: 'space-y-1.5',
+    className: 'space-y-1',
     children: [
       jsxs('div', {
         className: 'flex items-center justify-between gap-4 text-xs',
         children: [
-          jsx('span', { className: 'text-(--ui-text-secondary)', children: LABELS[window.key.split('-')[0]] || window.label }),
-          jsx('strong', {
-            className: 'font-medium text-(--ui-text-primary)',
-            children: usedUsd != null ? `${usd(usedUsd)} / ${usd(cap)}` : `${Math.round(usedPct)}% utilisés`
-          })
+          jsx('span', { className: 'text-(--ui-text-secondary)', children: LABELS[key] || window.label }),
+          jsxs('strong', { className: 'font-medium text-(--ui-text-primary)', children: [
+            usedUsd != null ? `${usd(usedUsd)} / ${usd(cap)}` : `${Math.round(usedPct)}\u00A0%`,
+            usedUsd != null ? jsxs('span', { className: 'ml-1 font-normal text-(--ui-text-quaternary)', children: `${Math.round(usedPct)}\u00A0%` }) : null
+          ] })
         ]
       }),
       jsx(Gauge, { remaining: window.remainingPercent, warning: low }),
-      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: `Reset ${formatReset(window.resetsAt)}` })
+      jsx(MetaLine, { children: `Reset ${formatReset(window.resetsAt)}` })
     ]
   })
 }
@@ -106,53 +128,65 @@ function PacingCard({ window }) {
   const margin = cap - projected
   const verdict = delta > 1 ? '🔴' : delta < -1 ? '🟢' : '🟡'
   const verdictText = delta > 1 ? `en avance de ${usd(Math.abs(delta))}` : delta < -1 ? `sous l'objectif de ${usd(Math.abs(delta))}` : 'dans le rythme'
-  const lines = [
-    `📅 Pacing : ${verdict} ${verdictText} (cible ${usd(target)})`,
-    margin >= 0
-      ? `Projection fin de fenêtre : ${usd(projected)} → marge ${usd(margin)}`
-      : `Projection fin de fenêtre : ${usd(projected)} → dépassement ${usd(Math.abs(margin))}`
-  ]
   return jsxs('div', {
-    className: 'space-y-0.5 rounded-md bg-(--ui-fill-tertiary) p-2 text-[0.6875rem] text-(--ui-text-secondary)',
-    children: lines.map((line, index) => jsx('div', { children: line }, index))
+    className: 'space-y-0.5 rounded-md bg-(--ui-fill-tertiary) p-2',
+    children: [
+      jsx('div', { className: 'text-[0.6875rem] font-medium text-(--ui-text-secondary)', children: `📅 Pacing · cible ${usd(target)}` }),
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: `${verdict} ${verdictText}` }),
+      jsx('div', {
+        className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+        children: margin >= 0
+          ? `Projection : ${usd(projected)} → marge ${usd(margin)}`
+          : `Projection : ${usd(projected)} → dépassement ${usd(Math.abs(margin))}`
+      })
+    ]
   })
 }
 
-/** Une ligne par autre compte, selon le kind renvoyé par /providers. */
+/**
+ * Autre compte : métrique unique = RESTANT, partout.
+ *  Exa           9,21 $ / 10,00 $
+ *  ▓▓▓▓▓▓░░░░░░░░░░░░░░
+ *  Budget mensuel · 0,79 $ utilisés
+ */
 function ProviderRow({ name, data }) {
   if (!data || data.status === 'not_configured' || data.status === 'unavailable') return null
+  const labels = { openrouter: 'OpenRouter', exa: 'Exa', kagi: 'Kagi', firecrawl: 'Firecrawl', tavily: 'Tavily' }
   if (data.status === 'error') {
     return jsxs('div', {
-      className: 'flex items-center justify-between gap-4 text-xs',
+      className: 'space-y-1',
       children: [
-        jsx('span', { className: 'text-(--ui-text-secondary)', children: name }),
-        jsx('span', { className: 'text-(--ui-warning)', title: data.error || '', children: '—' })
+        jsxs('div', {
+          className: 'flex items-center justify-between gap-4 text-xs',
+          children: [
+            jsx('span', { className: 'text-(--ui-text-secondary)', children: labels[name] || name }),
+            jsx('strong', { className: 'font-medium text-(--ui-warning)', title: data.error || '', children: '—' })
+          ]
+        }),
+        jsx(MetaLine, { children: 'Indisponible' })
       ]
     })
   }
-  const labels = {
-    openrouter: 'OpenRouter',
-    exa: 'Exa',
-    kagi: 'Kagi',
-    firecrawl: 'Firecrawl',
-    tavily: 'Tavily'
-  }
   let value = ''
-  let percent = null
-  let subline = ''
+  let remainingPct = null
+  let meta = ''
   if (data.kind === 'balance') {
     value = usd(data.balance)
-    if (name === 'openrouter' && Number(data.monthlyUsage) > 0) subline = `Mois ${usd(data.monthlyUsage)}`
+    meta = name === 'openrouter'
+      ? `Mois ${usd(data.monthlyUsage)} · semaine ${usd(data.weeklyUsage)}`
+      : 'Solde prépayé'
   } else if (data.kind === 'budget') {
     value = `${usd(data.remaining)} / ${usd(data.budget)}`
-    percent = data.budget ? 100 * data.spent / data.budget : null
+    remainingPct = data.budget ? 100 - 100 * data.spent / data.budget : null
+    meta = `Budget mensuel · ${usd(data.spent)} utilisés`
   } else if (data.kind === 'credits') {
     value = `${nb(data.remaining)} / ${nb(data.total)}`
-    percent = data.usedPercent
+    remainingPct = data.usedPercent != null ? 100 - data.usedPercent : null
+    meta = 'Crédits restants'
   } else if (data.kind === 'plan') {
-    value = data.limit != null ? `${nb(data.used)} / ${nb(data.limit)}` : nb(data.used)
-    percent = data.usedPercent
-    subline = data.plan || ''
+    value = data.remaining != null ? `${nb(data.remaining)} / ${nb(data.limit)}` : nb(data.used)
+    remainingPct = data.usedPercent != null ? 100 - data.usedPercent : null
+    meta = `${data.plan || 'Plan'} · ${nb(data.used)} utilisés`
   }
   return jsxs('div', {
     className: 'space-y-1',
@@ -164,8 +198,8 @@ function ProviderRow({ name, data }) {
           jsx('strong', { className: 'font-medium text-(--ui-text-primary)', children: value })
         ]
       }),
-      percent != null ? jsx(Gauge, { remaining: 100 - percent }) : null,
-      subline ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-quaternary)', children: subline }) : null
+      remainingPct != null ? jsx(Gauge, { remaining: remainingPct }) : null,
+      jsx(MetaLine, { children: meta })
     ]
   })
 }
@@ -210,6 +244,9 @@ function UsageMeter() {
   const tone = usage.isError || (remaining != null && remaining <= 20)
     ? 'text-(--ui-warning)'
     : 'text-(--ui-text-tertiary)'
+  const providersUpdated = providers.dataUpdatedAt
+    ? new Intl.DateTimeFormat('fr-FR', { hour: 'numeric', minute: '2-digit' }).format(new Date(providers.dataUpdatedAt))
+    : null
 
   return jsx(Popover, {
     open,
@@ -232,7 +269,7 @@ function UsageMeter() {
           sideOffset: 6,
           onMouseEnter: keepOpen,
           onMouseLeave: closeSoon,
-          className: 'relative w-80 overflow-hidden space-y-3 p-3',
+          className: 'relative w-80 space-y-3 p-3',
           children: usage.isError
             ? jsxs('div', {
                 className: 'space-y-1 text-xs',
@@ -245,26 +282,22 @@ function UsageMeter() {
                 className: 'space-y-3',
                 children: [
                   jsxs('div', {
-                    className: 'flex items-center justify-between',
+                    className: 'space-y-2',
                     children: [
-                      jsx('div', { className: 'text-xs font-medium', children: 'Limites Go' }),
-                      jsx('div', { className: 'text-[0.625rem] uppercase tracking-wide text-(--ui-text-quaternary)', children: 'GO' })
+                      jsx(SectionHeader, { title: 'Limites Go', badge: 'GO' }),
+                      ...windows.map(item => jsx(UsageRow, { window: item }, item.key)),
+                      monthly ? jsx(PacingCard, { window: monthly }) : null
                     ]
                   }),
-                  ...windows.map(item => jsx(UsageRow, { window: item }, item.key)),
-                  monthly ? jsx(PacingCard, { window: monthly }) : null,
+                  jsx('div', { className: 'border-t border-(--ui-stroke-secondary)', role: 'separator' }),
                   jsxs('div', {
                     className: 'space-y-2',
                     children: [
-                      jsx('div', { className: 'text-xs font-medium', children: 'Autres comptes' }),
+                      jsx(SectionHeader, { title: 'Autres comptes', badge: providersUpdated ? `maj ${providersUpdated}` : null }),
                       providers.isError
                         ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-warning)', children: 'Soldes indisponibles' })
                         : providerNames.map(name => jsx(ProviderRow, { name, data: providerData[name] }, name))
                     ]
-                  }),
-                  jsxs('div', {
-                    className: 'text-[0.625rem] text-(--ui-text-quaternary)',
-                    children: ['Soldes rafraîchis toutes les 2 min · ', providers.dataUpdatedAt ? new Intl.DateTimeFormat('fr-FR', { hour: 'numeric', minute: '2-digit' }).format(new Date(providers.dataUpdatedAt)) : '—']
                   })
                 ]
               })
